@@ -9,17 +9,10 @@ import { Tags } from '@/Components/create-question/types';
 import * as Yup from 'yup';
 import instance from '@/utils/axiosInstance';
 import { toast } from 'react-toastify';
+import { getTodayDate, isValidYouTubeUrl, extractVideoId } from '@/utils/youtubeUrlHelpers';
 
 
 
-// Helper function to get today's date in YYYY-MM-DD format
-const getTodayDate = () => {
-  const today = new Date();
-  const year = today.getFullYear();
-  const month = String(today.getMonth() + 1).padStart(2, '0');
-  const day = String(today.getDate()).padStart(2, '0');
-  return `${year}-${month}-${day}`;
-};
 
 const validationSchema = Yup.object({
   title: Yup.string().required('Title is required'),
@@ -43,7 +36,13 @@ const validationSchema = Yup.object({
     then: (schema) => schema.required('Division is required'),
     otherwise: (schema) => schema
   }),
-  tag_ids: Yup.array().of(Yup.number()).max(5, 'Maximum 5 tags allowed')
+  tag_ids: Yup.array().of(Yup.number()).max(5, 'Maximum 5 tags allowed'),
+  youtube_url: Yup.string()
+    .test('is-youtube-url', 'Please enter a valid YouTube URL', function(value) {
+      if (!value) return true; // Optional field
+      const youtubeRegex = /^(?:https?:\/\/)?(?:www\.)?(?:youtube\.com\/(?:[^\/\n\s]+\/\S+\/|(?:v|e(?:mbed)?)\/|\S*?[?&]v=)|youtu\.be\/)([a-zA-Z0-9_-]{11})/;
+      return youtubeRegex.test(value);
+    })
 });
 
 const QuestionCreatePage = () => {
@@ -57,6 +56,8 @@ const QuestionCreatePage = () => {
   const [personalSearchQuery, setPersonalSearchQuery] = useState('');
   const [isDivisionDropdownOpen, setIsDivisionDropdownOpen] = useState(false);
   const [divisionSearchQuery, setDivisionSearchQuery] = useState('');
+  const [isValidatingYouTube, setIsValidatingYouTube] = useState(false);
+  const [youTubeVideoId, setYouTubeVideoId] = useState<string | null>(null);
 
   const initialValues = {
     title: '',
@@ -66,7 +67,8 @@ const QuestionCreatePage = () => {
     collaborator_id: '',
     collaborator_division_id: '',
     tag_ids: [] as number[],
-    attachments: [] as File[]
+    attachments: [] as File[],
+    youtube_url: ''
   };
 
   // Fetch tags
@@ -165,6 +167,10 @@ const QuestionCreatePage = () => {
       
       formData.append('tag_ids', JSON.stringify(values.tag_ids));
       
+      if (values.youtube_url) {
+        formData.append('youtube_url', values.youtube_url);
+      }
+      
       values.attachments.forEach(file => {
         formData.append('attachments', file);
       });
@@ -176,7 +182,7 @@ const QuestionCreatePage = () => {
     },
     onSuccess: (data) => {
       toast.success('Question created successfully!');
-      router.push(`/questions/${data.data.question_id}`);
+      router.push(`/questions`);
     },
     onError: (error: any) => {
       console.error('Error creating question:', error);
@@ -576,7 +582,7 @@ const QuestionCreatePage = () => {
                                 onChange={(e) => setNewTagName(e.target.value)}
                                 placeholder="Create new tag..."
                                 className="flex-1 px-3 py-1 text-sm border border-gray-300 rounded-l-md focus:outline-none focus:ring-1 focus:ring-blue-500"
-                                onKeyPress={(e) => {
+                                onKeyDown={(e) => {
                                   if (e.key === 'Enter') {
                                     e.preventDefault();
                                     handleCreateTag();
@@ -607,7 +613,7 @@ const QuestionCreatePage = () => {
                               </div>
                             ) : (
                               <div>
-                                {filteredTags?.map((tag, index) => (
+                                {filteredTags?.map((tag) => (
                                   <div 
                                     key={`tag-${tag.tag_id}`}
                                     className={`flex items-center justify-between px-4 py-3 cursor-pointer hover:bg-gray-100 transition-colors border-b border-gray-50 last:border-b-0 ${
@@ -695,6 +701,88 @@ const QuestionCreatePage = () => {
                         ))}
                       </div>
                     )}
+                  </div>
+                  
+                  {/* YouTube Video Section */}
+                  <div>
+                    <label htmlFor="youtube_url" className="block text-sm font-medium text-gray-700 mb-1">
+                      YouTube Video (Optional)
+                    </label>
+                    <Field name="youtube_url">
+                      {({ field, meta }: any) => (
+                        <div>
+                          <input
+                            {...field}
+                            type="url"
+                            placeholder="Paste YouTube URL (e.g., https://youtube.com/watch?v=...)"
+                            className={`w-full px-4 py-2 border rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-blue-500 ${
+                              meta.touched && meta.error ? 'border-red-500' : 'border-gray-300'
+                            }`}
+                            onChange={(e) => {
+                              field.onChange(e);
+                              const url = e.target.value;
+                              if (url && isValidYouTubeUrl(url)) {
+                                setIsValidatingYouTube(true);
+                                const videoId = extractVideoId(url);
+                                setYouTubeVideoId(videoId);
+                                setTimeout(() => setIsValidatingYouTube(false), 500);
+                              } else {
+                                setYouTubeVideoId(null);
+                                setIsValidatingYouTube(false);
+                              }
+                            }}
+                            aria-label="YouTube video URL"
+                          />
+                          {meta.touched && meta.error && (
+                            <p className="mt-1 text-sm text-red-500">{meta.error}</p>
+                          )}
+                        </div>
+                      )}
+                    </Field>
+                    
+                    {isValidatingYouTube && (
+                      <div className="mt-2 flex items-center text-sm text-gray-600">
+                        <svg className="animate-spin -ml-1 mr-2 h-4 w-4 text-blue-600" xmlns="http://www.w3.org/2000/svg" fill="none" viewBox="0 0 24 24">
+                          <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4"></circle>
+                          <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+                        </svg>
+                        Validating video...
+                      </div>
+                    )}
+                    
+                    {youTubeVideoId && !isValidatingYouTube && (
+                      <div className="mt-3">
+                        <div className="flex items-center justify-between mb-2">
+                          <span className="text-sm font-medium text-gray-700">Video Preview</span>
+                          <button
+                            type="button"
+                            onClick={() => {
+                              setFieldValue('youtube_url', '');
+                              setYouTubeVideoId(null);
+                            }}
+                            className="text-sm text-red-600 hover:text-red-700 flex items-center"
+                            aria-label="Remove video"
+                          >
+                            <X className="w-4 h-4 mr-1" />
+                            Remove Video
+                          </button>
+                        </div>
+                        <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+                          <iframe
+                            src={`https://www.youtube.com/embed/${youTubeVideoId}`}
+                            title="YouTube video preview"
+                            className="absolute top-0 left-0 w-full h-full rounded-lg border-0"
+                            allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                            allowFullScreen
+                            loading="lazy"
+                          ></iframe>
+                        </div>
+                      </div>
+                    )}
+                    
+                    <p className="mt-1 text-sm text-gray-500">
+                      Add a YouTube video to provide visual context for your question
+                    </p>
                   </div>
                   
                   {/* Submit Button */}

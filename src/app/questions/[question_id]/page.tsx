@@ -8,6 +8,8 @@ import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { ThumbsUp, MessageSquare, Send, X, Paperclip, Download, Eye, ChevronLeft, ChevronRight, Bookmark, Star } from "lucide-react";
 import { Formik, Form, Field } from "formik";
 import * as Yup from "yup";
+import { getAttachmentUrl, getFileIcon, isImageFile, canPreview, formatFileSize } from "@/utils/attachmentHelper";
+import { isYouTubeAttachment, extractVideoId } from "@/utils/youtubeUrlHelpers";
 
 interface User {
   user_id: number;
@@ -244,6 +246,83 @@ const FeedbackModal: React.FC<{
   );
 };
 
+// YouTube Video Player Component
+const YouTubePlayer: React.FC<{
+  attachment: Attachment;
+  className?: string;
+  onError?: () => void;
+}> = React.memo(({ attachment, className = "", onError }) => {
+  const [hasError, setHasError] = useState(false);
+  const videoId = extractVideoId(attachment.file_path);
+  
+  if (!videoId || hasError) {
+    return (
+      <div className={`bg-gray-100 border border-gray-200 rounded-lg p-4 ${className}`}>
+        <div className="flex items-center justify-between mb-2">
+          <div className="flex items-center space-x-2">
+            <span className="text-red-600">🎥</span>
+            <div>
+              <h4 className="text-sm font-medium text-gray-900">{attachment.file_name}</h4>
+              <p className="text-xs text-gray-500">YouTube Video</p>
+            </div>
+          </div>
+        </div>
+        <div className="text-center py-8 text-gray-500">
+          <p className="mb-2">Unable to load video preview</p>
+          <a 
+            href={attachment.file_path} 
+            target="_blank" 
+            rel="noopener noreferrer"
+            className="text-blue-600 hover:text-blue-800 underline text-sm"
+          >
+            Watch on YouTube
+          </a>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <div className={`bg-white border border-gray-200 rounded-lg overflow-hidden ${className}`}>
+      <div className="flex items-center justify-between p-3 bg-gray-50 border-b">
+        <div className="flex items-center space-x-2">
+          <span className="text-red-600">🎥</span>
+          <div>
+            <h4 className="text-sm font-medium text-gray-900" title={attachment.file_name}>
+              {attachment.file_name}
+            </h4>
+            <p className="text-xs text-gray-500">YouTube Video</p>
+          </div>
+        </div>
+        <a 
+          href={attachment.file_path} 
+          target="_blank" 
+          rel="noopener noreferrer"
+          className="p-1 text-blue-600 hover:text-blue-800 transition-colors"
+          title="Open on YouTube"
+        >
+          <Eye size={14} />
+        </a>
+      </div>
+      
+      <div className="relative w-full" style={{ paddingBottom: '56.25%' }}>
+        <iframe
+          src={`https://www.youtube.com/embed/${videoId}?rel=0`}
+          title={attachment.file_name}
+          className="absolute top-0 left-0 w-full h-full border-0"
+          allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+          allowFullScreen
+          loading="lazy"
+          onError={() => {
+            setHasError(true);
+            onError?.();
+          }}
+        />
+      </div>
+    </div>
+  );
+});
+
 const QuestionDetailsPage: React.FC = () => {
   const { question_id } = useParams();
   const router = useRouter();
@@ -270,7 +349,10 @@ const QuestionDetailsPage: React.FC = () => {
       }
       return response.data.data as QuestionDetails;
     },
-    retry: 1
+    retry: 1,
+    staleTime: 5 * 60 * 1000, // 5 minutes
+    refetchOnWindowFocus: false,
+    refetchInterval: false
   });
 
   console.log("Question data:", question);
@@ -281,15 +363,17 @@ const QuestionDetailsPage: React.FC = () => {
       const response = await instance.get(`/question/${question_id}/like/status`)
       return response.data.data
     },
-    retryOnMount: true
+    staleTime: 2 * 60 * 1000, // 2 minutes
+    refetchOnWindowFocus: false,
+    refetchInterval: false
   })
 
   // Reading time and scroll tracking
   useEffect(() => {
-    // Start timer when component mounts
-    timerRef.current = setInterval(() => {
-      setReadingTime(prev => prev + 1);
-    }, 1000);
+    // Disable timer to prevent re-renders
+    // timerRef.current = setInterval(() => {
+    //   setReadingTime(prev => prev + 1);
+    // }, 1000);
 
     // Handle scroll tracking
     const handleScroll = () => {
@@ -489,38 +573,6 @@ const QuestionDetailsPage: React.FC = () => {
     });
   };
 
-  const getFileIcon = (filename: string) => {
-    const ext = filename.split(".").pop()?.toLowerCase();
-    switch (ext) {
-      case "pdf": return "📄";
-      case "docx": case "doc": return "📝";
-      case "xlsx": case "xls": return "📊";
-      case "pptx": case "ppt": return "📊";
-      case "png": case "jpg": case "jpeg": case "gif": case "webp": return "🖼️";
-      case "mp4": case "avi": case "mov": return "🎥";
-      case "mp3": case "wav": case "flac": return "🎵";
-      case "zip": case "rar": case "7z": return "📦";
-      case "txt": case "md": return "📃";
-      default: return "📎";
-    }
-  };
-  
-  const canPreview = (fileName: string) => {
-    const extension = fileName.split(".").pop()?.toLowerCase();
-    const previewableExtensions = [
-      "txt", "md", "json", "csv", "xml", "html", 
-      "js", "css", "py", "java", "cpp", "c",
-      "png", "jpg", "jpeg", "gif", "webp", "svg", "bmp", "pdf"
-    ];
-    return previewableExtensions.includes(extension || "");
-  };
-
-  const isImageFile = (fileName: string) => {
-    const extension = fileName.split(".").pop()?.toLowerCase();
-    const imageExtensions = ["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"];
-    return imageExtensions.includes(extension || "");
-  };
-
   const canUserAnswer = () => {
     if (!question) return false;
     
@@ -559,14 +611,19 @@ const QuestionDetailsPage: React.FC = () => {
 
     try {
       const extension = attachment.file_name.split(".").pop()?.toLowerCase();
+      const isS3 = attachment.file_path?.startsWith('https://');
 
       if (["png", "jpg", "jpeg", "gif", "webp", "svg", "bmp"].includes(extension || "")) {
-        const response = await instance.get(
-          `/attachment/download/${attachment.attachment_id}`,
-          { responseType: "blob" }
-        );
-        const imageUrl = URL.createObjectURL(response.data);
-        setPreviewContent({ type: "image", content: imageUrl });
+        if (isS3) {
+          setPreviewContent({ type: "image", content: getAttachmentUrl(attachment) });
+        } else {
+          const response = await instance.get(
+            `/attachment/download/${attachment.attachment_id}`,
+            { responseType: "blob" }
+          );
+          const imageUrl = URL.createObjectURL(response.data);
+          setPreviewContent({ type: "image", content: imageUrl });
+        }
       } else if (["txt", "md", "json", "csv", "xml", "html", "js", "css", "py", "java", "cpp", "c"].includes(extension || "")) {
         const response = await instance.get(
           `/attachment/download/${attachment.attachment_id}`,
@@ -574,12 +631,16 @@ const QuestionDetailsPage: React.FC = () => {
         );
         setPreviewContent({ type: "text", content: response.data });
       } else if (extension === "pdf") {
-        const response = await instance.get(
-          `/attachment/download/${attachment.attachment_id}`,
-          { responseType: "blob" }
-        );
-        const pdfUrl = URL.createObjectURL(response.data);
-        setPreviewContent({ type: "pdf", content: pdfUrl });
+        if (isS3) {
+          setPreviewContent({ type: "pdf", content: getAttachmentUrl(attachment) });
+        } else {
+          const response = await instance.get(
+            `/attachment/download/${attachment.attachment_id}`,
+            { responseType: "blob" }
+          );
+          const pdfUrl = URL.createObjectURL(response.data);
+          setPreviewContent({ type: "pdf", content: pdfUrl });
+        }
       }
     } catch (error) {
       console.error("Preview failed:", error);
@@ -597,14 +658,6 @@ const QuestionDetailsPage: React.FC = () => {
     setPreviewContent(null);
   };
 
-  const formatFileSize = (bytes: number) => {
-    if (!bytes) return "Unknown size";
-    const sizes = ["Bytes", "KB", "MB", "GB"];
-    if (bytes === 0) return "0 Bytes";
-    const i = Math.floor(Math.log(bytes) / Math.log(1024));
-    return Math.round((bytes / Math.pow(1024, i)) * 100) / 100 + " " + sizes[i];
-  };
-
   const formatDate = (dateString: string) => {
     return new Date(dateString).toLocaleDateString("en-US", {
       year: "numeric",
@@ -615,7 +668,7 @@ const QuestionDetailsPage: React.FC = () => {
     });
   };
 
-  // Horizontal Scrollable Attachment Component
+  // Enhanced Attachment Display with YouTube Support
   const AttachmentCarousel = ({ attachments, title }: { attachments: Attachment[], title: string }) => {
     const scrollRef = React.useRef<HTMLDivElement>(null);
 
@@ -633,37 +686,59 @@ const QuestionDetailsPage: React.FC = () => {
 
     if (!attachments || attachments.length === 0) return null;
 
+    // Separate YouTube videos from regular attachments
+    const youtubeVideos = attachments.filter(isYouTubeAttachment);
+    const regularAttachments = attachments.filter(attachment => !isYouTubeAttachment(attachment));
+
     return (
       <div className="border-t pt-4">
-        <div className="flex items-center justify-between mb-3">
-          <h3 className="text-sm font-medium text-gray-900">
-            {title} ({attachments.length})
-          </h3>
-          {attachments.length > 2 && (
-            <div className="flex space-x-1">
-              <button
-                onClick={scrollLeft}
-                className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                <ChevronLeft size={16} className="text-gray-600" />
-              </button>
-              <button
-                onClick={scrollRight}
-                className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
-              >
-                <ChevronRight size={16} className="text-gray-600" />
-              </button>
+        {/* YouTube Videos Section */}
+        {youtubeVideos.length > 0 && (
+          <div className="mb-6">
+            <div className="flex flex-col items-center gap-4">
+              {youtubeVideos.map((attachment) => (
+                <YouTubePlayer 
+                  key={`youtube-${attachment.attachment_id}-${attachment.file_path}`}
+                  attachment={attachment}
+                  className="w-full max-w-4xl"
+                />
+              ))}
             </div>
-          )}
-        </div>
-        
-        <div 
-          ref={scrollRef}
-          className="flex space-x-3 overflow-x-auto scrollbar-hide pb-2"
-          style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
-        >
-          {attachments.map((attachment) => {
-            if (isImageFile(attachment.file_name)) {
+          </div>
+        )}
+
+        {/* Regular Attachments Section */}
+        {regularAttachments.length > 0 && (
+          <>
+            <div className="flex items-center justify-between mb-3">
+              <h3 className="text-sm font-medium text-gray-900">
+                📎 {youtubeVideos.length > 0 ? 'File Attachments' : title} ({regularAttachments.length})
+              </h3>
+              {regularAttachments.length > 2 && (
+                <div className="flex space-x-1">
+                  <button
+                    onClick={scrollLeft}
+                    className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                  >
+                    <ChevronLeft size={16} className="text-gray-600" />
+                  </button>
+                  <button
+                    onClick={scrollRight}
+                    className="p-1 rounded-full bg-gray-100 hover:bg-gray-200 transition-colors"
+                  >
+                    <ChevronRight size={16} className="text-gray-600" />
+                  </button>
+                </div>
+              )}
+            </div>
+            
+            <div 
+              ref={scrollRef}
+              className="flex space-x-3 overflow-x-auto scrollbar-hide pb-2"
+              style={{ scrollbarWidth: 'none', msOverflowStyle: 'none' }}
+            >
+              {regularAttachments.map((attachment) => {
+                if (isImageFile(attachment.file_name)) {
               return (
                 <div
                   key={attachment.attachment_id}
@@ -700,7 +775,7 @@ const QuestionDetailsPage: React.FC = () => {
                   </div>
                   <div className="p-2">
                     <img 
-                      src={`http://localhost:4700/attachments/${attachment.file_name}`}
+                      src={getAttachmentUrl(attachment)}
                       crossOrigin="use-credentials"
                       alt={attachment.file_name}
                       className="w-full h-auto max-h-40 object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
@@ -757,22 +832,44 @@ const QuestionDetailsPage: React.FC = () => {
                   </div>
                 </div>
               );
-            }
-          })}
-        </div>
+              }
+            })}
+            </div>
+          </>
+        )}
       </div>
     );
   };
 
-  // Enhanced Attachment Display for Comments/Replies
+  // Enhanced Attachment Display for Comments/Replies with YouTube Support
   const AttachmentList = ({ attachments }: { attachments: Attachment[] }) => {
     if (!attachments || attachments.length === 0) return null;
+
+    // Separate YouTube videos from regular attachments
+    const youtubeVideos = attachments.filter(isYouTubeAttachment);
+    const regularAttachments = attachments.filter(attachment => !isYouTubeAttachment(attachment));
 
     return (
       <div className="mt-3">
         <h4 className="text-xs font-medium text-gray-500 mb-2">Attachments:</h4>
-        <div className="space-y-2">
-          {attachments.map(attachment => {
+        
+        {/* YouTube Videos */}
+        {youtubeVideos.length > 0 && (
+          <div className="space-y-2 mb-3">
+            {youtubeVideos.map((attachment) => (
+              <YouTubePlayer 
+                key={attachment.attachment_id}
+                attachment={attachment}
+                className="max-w-md"
+              />
+            ))}
+          </div>
+        )}
+
+        {/* Regular Attachments */}
+        {regularAttachments.length > 0 && (
+          <div className="space-y-2">
+            {regularAttachments.map(attachment => {
             if (isImageFile(attachment.file_name)) {
               return (
                 <div key={attachment.attachment_id} className="bg-white rounded border border-gray-200 overflow-hidden">
@@ -807,7 +904,12 @@ const QuestionDetailsPage: React.FC = () => {
                   </div>
                   <div className="p-2">
                     <img 
-                      src={`http://localhost:4700/attachments/${attachment.file_name}`}
+                      src={(() => {
+                        console.log('Attachment object for image:', attachment);
+                        const url = getAttachmentUrl(attachment);
+                        console.log('Generated URL:', url);
+                        return url;
+                      })()}
                       crossOrigin="use-credentials"
                       alt={attachment.file_name}
                       className="w-full h-auto max-h-64 object-contain rounded cursor-pointer hover:opacity-90 transition-opacity"
@@ -863,7 +965,8 @@ const QuestionDetailsPage: React.FC = () => {
               );
             }
           })}
-        </div>
+          </div>
+        )}
       </div>
     );
   };
@@ -1110,17 +1213,19 @@ const QuestionDetailsPage: React.FC = () => {
                 {question.creator.username[0].toUpperCase()}
               </div>
               <div>
-                <span className="font-medium text-gray-900">
-                  {question.creator.username}
-                </span>
+                <div className="flex items-center space-x-2">
+                  <span className="font-medium text-gray-900">
+                    {question.creator.username}
+                  </span>
+                  <span className="text-sm text-gray-500">
+                    {formatDate(question.created_at)}
+                  </span>
+                </div>
                 {question.creator.division && (
-                  <span className="text-sm text-gray-500 block">
+                  <span className="text-sm text-gray-500">
                     {question.creator.division.division_name}
                   </span>
                 )}
-                <span className="text-sm text-gray-500">
-                  {formatDate(question.created_at)}
-                </span>
               </div>
             </div>
 
@@ -1162,8 +1267,13 @@ const QuestionDetailsPage: React.FC = () => {
               </div>
             </div>
           ) : (
-            <div>
-              <p className="text-sm text-gray-500">Open Question.</p>
+            <div className="mb-4 p-3 bg-gray-50 rounded">
+              <p className="text-sm text-gray-600">
+                <span className="inline-flex items-center px-2 py-1 rounded-full text-xs font-medium bg-green-100 text-green-800">
+                  Open Question
+                </span>
+                <span className="ml-2">Anyone can answer this question</span>
+              </p>
             </div>
           )}
 
@@ -1457,7 +1567,7 @@ const QuestionDetailsPage: React.FC = () => {
                   </p>
                   
                   {/* Answer Attachments - Enhanced */}
-                  <AttachmentList attachments={answer.attachment || []} />
+                  <AttachmentList attachments={Array.isArray(answer.attachment) ? answer.attachment : answer.attachment ? [answer.attachment] : []} />
                 </div>
               ))}
             </div>
